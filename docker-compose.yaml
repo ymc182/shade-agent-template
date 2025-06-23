@@ -1,9 +1,11 @@
 services:
-    web:
-        platform: linux/amd64 # Explicitly set for TDX
-        image: pivortex/shade-agent-template:latest@sha256:cd8a76702a3949b31a34333cc3c80f6bfbe0874d301fa8f030eebc1b4d264d9c
-        ports:
-            - '3000:3000'
-        volumes:
-            - /var/run/tappd.sock:/var/run/tappd.sock
-        restart: always
+  web:
+    platform: linux/amd64 # Explicitly set for TDX
+    image: ymc182/shade-agent:latest@sha256:2a2a42092d18d099db78561757d62a439df6e50ba52d96994cda81b0ec4494b0
+    env_file:
+      - .env.development.local
+    ports:
+      - "3000:3000"
+    volumes:
+      - /var/run/tappd.sock:/var/run/tappd.sock
+    restart: always

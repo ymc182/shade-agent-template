@@ -3,10 +3,10 @@ import * as dotenv from 'dotenv';
 dotenv.config({ path: './.env.development.local' });
 import * as nearAPI from 'near-api-js';
 const { Near, Account, KeyPair, keyStores } = nearAPI;
-
+//sha256:2a2a42092d18d099db78561757d62a439df6e50ba52d96994cda81b0ec4494b0
 // NEEDS TO MATCH docker-compose.yaml CODEHASH
 const codehash =
-'cd8a76702a3949b31a34333cc3c80f6bfbe0874d301fa8f030eebc1b4d264d9c';
+'2a2a42092d18d099db78561757d62a439df6e50ba52d96994cda81b0ec4494b0';
 
 const networkId = 'testnet';
 const accountId = process.env.NEXT_PUBLIC_accountId;

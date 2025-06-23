@@ -1,4 +1,4 @@
-const withTM = require('next-transpile-modules')(['chainsig.js', '@cosmjs/proto-signing', 'cosmjs-types', '@near-js/keystores', '@near-js/crypto', '@near-js/utils', '@near-js/types']);
+import withTM from 'next-transpile-modules';
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -10,13 +10,13 @@ const nextConfig = {
                 fs: false,
                 tls: false,
                 crypto: false,
-                stream: require.resolve('stream-browserify'),
-                url: require.resolve('url'),
-                http: require.resolve('stream-http'),
-                https: require.resolve('https-browserify'),
-                assert: require.resolve('assert'),
-                os: require.resolve('os-browserify'),
-                path: require.resolve('path-browserify'),
+                stream: 'stream-browserify',
+                url: 'url',
+                http: 'stream-http',
+                https: 'https-browserify',
+                assert: 'assert',
+                os: 'os-browserify',
+                path: 'path-browserify',
             };
         }
         
@@ -27,4 +27,6 @@ const nextConfig = {
     },
 };
 
-module.exports = withTM(nextConfig);
+const withTranspileModules = withTM(['chainsig.js', '@cosmjs/proto-signing', 'cosmjs-types', '@near-js/keystores', '@near-js/crypto', '@near-js/utils', '@near-js/types']);
+
+export default withTranspileModules(nextConfig);
