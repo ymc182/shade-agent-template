@@ -13,8 +13,10 @@ const {
     Account,
     KeyPair,
     keyStores,
-    utils: { PublicKey },
+    utils: { PublicKey, format: { formatNearAmount } },
 } = nearAPI;
+
+export { formatNearAmount };
 
 // from .env
 let _contractId = process.env.NEXT_PUBLIC_contractId;
