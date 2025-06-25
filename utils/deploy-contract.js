@@ -14,7 +14,7 @@ const contractId = process.env.NEXT_PUBLIC_contractId;
 console.log(accountId, contractId);
 
 const keyStore = new keyStores.InMemoryKeyStore();
-const keyPair = KeyPair.fromString(process.env.NEXT_PUBLIC_secretKey);
+const keyPair = KeyPair.fromString(process.env.secretKey);
 keyStore.setKey(networkId, accountId, keyPair);
 keyStore.setKey(networkId, contractId, keyPair);
 console.log(keyStore);

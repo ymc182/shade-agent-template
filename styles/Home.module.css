@@ -35,11 +35,56 @@
 }
 
 .btn {
-  font-family: sans-serif;
-  border: 1px solid #bbb;
+  padding: 0.5rem 1rem;
+  margin: 0.5rem 0;
+  border: 1px solid #eaeaea;
+  border-radius: 5px;
+  background: white;
+  cursor: pointer;
+  transition: all 0.3s ease;
 }
+
 .btn:hover {
-  background-color: #bbb;
+  border-color: #0070f3;
+  color: #0070f3;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btnActive {
+  background: #0070f3;
+  color: white;
+  border-color: #0070f3;
+}
+
+.btnActive:hover {
+  background: #0051cc;
+  border-color: #0051cc;
+}
+
+.input {
+  padding: 0.5rem;
+  margin: 0.5rem 0;
+  border: 1px solid #eaeaea;
+  border-radius: 5px;
+  font-size: 1rem;
+}
+
+.input:focus {
+  outline: none;
+  border-color: #0070f3;
+}
+
+.userDashboard {
+  width: 100%;
+  max-width: 800px;
+}
+
+.userDashboard .card {
+  margin-bottom: 1rem;
 }
 
 .main {
