@@ -11,6 +11,7 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
   try {
     // Check if user is registered
     const isRegistered = await contractView({
+      accountId,
       methodName: "is_user_registered",
       args: { user_id: accountId },
     });
@@ -26,6 +27,7 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
 
     // Get user permissions
     const permissions = await contractView({
+      accountId,
       methodName: "get_user_permissions",
       args: { user_id: accountId },
     });
@@ -37,16 +39,23 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
     // Get ETH balance
     const balance = await Evm.getBalance(address);
 
+    // Convert BigInt to string for JSON serialization
+    const balanceStr = balance.balance.toString();
+    const balanceBigInt = BigInt(balanceStr);
+    const ethUnit = BigInt(10 ** 18);
+
+    // Format balance: whole.fractional
+    const wholePart = (balanceBigInt / ethUnit).toString();
+    const fractionalPart = (balanceBigInt % ethUnit).toString().padStart(18, "0").slice(0, 6);
+    const formattedBalance = `${wholePart}.${fractionalPart}`;
+
     return res.status(200).json({
       success: true,
       registered: true,
       accountId,
       ethAddress: address,
-      ethBalance: balance.balance,
-      ethBalanceFormatted:
-        (BigInt(balance.balance) / BigInt(10 ** 18)).toString() +
-        "." +
-        (BigInt(balance.balance) % BigInt(10 ** 18)).toString().padStart(18, "0").slice(0, 6),
+      ethBalance: balanceStr, // Keep as string
+      ethBalanceFormatted: formattedBalance,
       permissions,
       derivationPath,
     });

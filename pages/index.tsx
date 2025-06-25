@@ -278,20 +278,6 @@ export default function Home() {
                 href="#"
                 className={styles.card}
                 onClick={async () => {
-                  if (process.env.NODE_ENV !== "production") {
-                    setMessageHide(
-                      <>
-                        <p>Registration not needed in development mode</p>
-                        <p className={styles.code}>
-                          TEE operations are only available in production
-                        </p>
-                      </>,
-                      3000,
-                      true
-                    );
-                    return;
-                  }
-
                   setMessage({
                     text: "Registering Worker",
                     success: true,

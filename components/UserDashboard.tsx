@@ -7,6 +7,7 @@ import styles from "../styles/Home.module.css";
 import "@near-wallet-selector/modal-ui/styles.css";
 import { useSimpleAuth } from "../hooks/useSimpleAuth";
 import { useAuth } from "../hooks/useAuth";
+import { getContractPrice, convertToDecimal } from "../utils/ethereum";
 
 export default function UserDashboard() {
   const [wallet, setWallet] = useState(null);
@@ -16,16 +17,32 @@ export default function UserDashboard() {
   const [nearBalance, setNearBalance] = useState(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
-  const [txTo, setTxTo] = useState("");
-  const [txValue, setTxValue] = useState("");
   const [sending, setSending] = useState(false);
-  const [transactions, setTransactions] = useState([]);
+  const [currentPrice, setCurrentPrice] = useState("0");
+  const [priceUpdating, setPriceUpdating] = useState(false);
   const { getAuthHeaders } = useSimpleAuth();
   const { authenticate, isAuthenticating } = useAuth();
 
   useEffect(() => {
     initWallet();
   }, []);
+
+  useEffect(() => {
+    // Fetch current price when component mounts or user changes
+    if (ethAddress) {
+      fetchCurrentPrice();
+    }
+  }, [ethAddress]);
+
+  const fetchCurrentPrice = async () => {
+    try {
+      const price = await getContractPrice();
+      const formattedPrice = convertToDecimal(price, 2);
+      setCurrentPrice(formattedPrice);
+    } catch (error) {
+      console.error("Error fetching price:", error);
+    }
+  };
 
   const initWallet = async () => {
     try {
@@ -61,6 +78,8 @@ export default function UserDashboard() {
     const accountId = walletSelector.getAccountId();
     if (!accountId) return;
 
+    console.log("Loading user data for:", accountId);
+
     try {
       const authHeaders = await getAuthHeaders(accountId);
 
@@ -73,10 +92,16 @@ export default function UserDashboard() {
       });
 
       const data = await res.json();
+      console.log("User info response:", data);
 
       if (data.registered) {
         setEthAddress(data.ethAddress);
         setEthBalance(data.ethBalanceFormatted);
+        setMessage(""); // Clear any previous messages
+      } else {
+        // User not registered yet
+        setEthAddress("");
+        setEthBalance("0");
       }
 
       // Get NEAR balance
@@ -86,6 +111,8 @@ export default function UserDashboard() {
       console.error("Error loading user data:", error);
       if (error.message?.includes("User rejected")) {
         setMessage("Message signing was rejected. Please try again.");
+      } else {
+        setMessage(`Error loading user data: ${error.message}`);
       }
     }
   };
@@ -110,7 +137,50 @@ export default function UserDashboard() {
     setLoading(true);
     setMessage("");
     const accountId = walletSelector.getAccountId();
+
     try {
+      // Call register_user on the contract directly from the client
+      const result = await walletSelector.signAndSendTransaction({
+        receiverId: process.env.NEXT_PUBLIC_contractId,
+        actions: [
+          {
+            type: "FunctionCall",
+            params: {
+              methodName: "register_user",
+              args: {},
+              gas: "300000000000000", // 30 TGas
+              deposit: "0",
+            },
+          },
+        ],
+      });
+
+      // Extract the derivation path from the contract response
+      let derivationPath = null;
+      if (result && "receipts_outcome" in result && result.receipts_outcome) {
+        for (const outcome of result.receipts_outcome) {
+          if (
+            outcome.outcome.status &&
+            typeof outcome.outcome.status === "object" &&
+            "SuccessValue" in outcome.outcome.status
+          ) {
+            const successValue = outcome.outcome.status.SuccessValue;
+            if (successValue) {
+              // Decode the base64 result
+              const decodedResult = atob(successValue);
+              // Remove quotes if present
+              derivationPath = decodedResult.replace(/^"|"$/g, "");
+              break;
+            }
+          }
+        }
+      }
+
+      if (!derivationPath) {
+        throw new Error("Failed to get derivation path from contract");
+      }
+
+      // Now notify the server that registration is complete
       const authHeaders = await getAuthHeaders(accountId);
 
       const res = await fetch("/api/user/register", {
@@ -119,7 +189,11 @@ export default function UserDashboard() {
           "Content-Type": "application/json",
           ...authHeaders,
         },
-        body: JSON.stringify({ accountId }),
+        body: JSON.stringify({
+          accountId,
+          derivationPath,
+          txHash: result && "transaction" in result ? result.transaction.hash : undefined,
+        }),
       });
 
       const data = await res.json();
@@ -134,81 +208,162 @@ export default function UserDashboard() {
       }
     } catch (error) {
       console.error("Registration error:", error);
+
+      // Check if user is already registered
+      if (
+        error.message?.includes("already registered") ||
+        error.message?.includes("User already registered")
+      ) {
+        // Try to get the user's ETH address from the server
+        try {
+          const authHeaders = await getAuthHeaders(accountId);
+          const res = await fetch("/api/user/info", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...authHeaders,
+            },
+          });
+          const data = await res.json();
+          if (data.registered) {
+            setEthAddress(data.ethAddress);
+            setMessage("User already registered");
+            await loadUserData();
+            setLoading(false);
+            return;
+          }
+        } catch (infoError) {
+          console.error("Failed to get user info:", infoError);
+        }
+      }
+
       if (error.message?.includes("User rejected")) {
-        setMessage("Message signing was rejected. Please try again.");
+        setMessage("Transaction was rejected. Please try again.");
       } else {
-        setMessage("Error during registration");
+        setMessage(error.message || "Error during registration");
       }
     }
 
     setLoading(false);
   };
 
-  const sendTransaction = async () => {
-    if (!txTo || !txValue) {
-      setMessage("Please enter recipient address and amount");
-      return;
-    }
-
-    setSending(true);
+  const updatePrice = async () => {
+    setPriceUpdating(true);
     setMessage("");
-
-    const body = {
-      to: txTo,
-      value: (parseFloat(txValue) * 10 ** 18).toString(), // Convert ETH to Wei
-      data: "0x",
-      message: JSON.stringify({
-        action: "send_transaction",
-        timestamp: Date.now(),
-        to: txTo,
-        value: txValue,
-      }),
-    };
 
     try {
       const accountId = walletSelector.getAccountId();
       const authHeaders = await getAuthHeaders(accountId);
 
-      const res = await fetch("/api/user/sendTransaction", {
+      // Step 1: Prepare the transaction
+      const prepareRes = await fetch("/api/user/updatePrice", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           ...authHeaders,
         },
-        body: JSON.stringify(body),
       });
 
-      const data = await res.json();
+      const prepareData = await prepareRes.json();
 
-      if (data.success) {
-        setMessage(`Transaction sent! Hash: ${data.txHash}`);
-        setTransactions([
-          ...transactions,
+      if (!prepareData.success) {
+        setMessage(prepareData.error || "Failed to prepare price update");
+        setPriceUpdating(false);
+        return;
+      }
+
+      // Step 2: Sign the transaction with NEAR wallet
+      console.log("Hash to sign:", prepareData.hashToSign);
+
+      const result = await walletSelector.signAndSendTransaction({
+        receiverId: process.env.NEXT_PUBLIC_contractId,
+        actions: [
           {
-            hash: data.txHash,
-            to: data.to,
-            value: txValue,
-            timestamp: new Date().toLocaleString(),
+            type: "FunctionCall",
+            params: {
+              methodName: "sign_tx_for_user",
+              args: {
+                user_id: accountId,
+                payload: prepareData.hashToSign, // Send the hash directly
+                derivation_path: prepareData.derivationPath,
+                key_version: 0,
+              },
+              gas: "300000000000000", // 30 TGas
+              deposit: "0",
+            },
           },
-        ]);
-        // Clear form
-        setTxTo("");
-        setTxValue("");
-        // Reload balance
-        await loadUserData();
+        ],
+      });
+
+      // Extract the signature from the contract response
+      let signature = null;
+      if (result && "receipts_outcome" in result && result.receipts_outcome) {
+        for (const outcome of result.receipts_outcome) {
+          if (
+            outcome.outcome.status &&
+            typeof outcome.outcome.status === "object" &&
+            "SuccessValue" in outcome.outcome.status
+          ) {
+            const successValue = outcome.outcome.status.SuccessValue;
+            if (successValue) {
+              // Decode the base64 result
+              const decodedResult = atob(successValue);
+              try {
+                signature = JSON.parse(decodedResult);
+                break;
+              } catch (e) {
+                console.error("Failed to parse signature:", e);
+              }
+            }
+          }
+        }
+      }
+
+      if (!signature) {
+        throw new Error("Failed to get signature from contract");
+      }
+
+      // Step 3: Finalize and broadcast the transaction
+      const finalizeRes = await fetch("/api/user/finalizeUpdatePrice", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders,
+        },
+        body: JSON.stringify({
+          signature: signature,
+          serializedTransaction: prepareData.serializedTransaction,
+          transactionDetails: prepareData.transactionDetails,
+        }),
+      });
+
+      const finalizeData = await finalizeRes.json();
+
+      if (finalizeData.success) {
+        setMessage(`Price updated successfully! New price: $${finalizeData.newPrice}`);
+        setCurrentPrice(finalizeData.newPrice);
+
+        // Show transaction link
+        if (finalizeData.explorerUrl) {
+          setTimeout(() => {
+            setMessage(
+              `Price updated! New price: $${finalizeData.newPrice} - View transaction at: ${finalizeData.explorerUrl}`
+            );
+          }, 100);
+        }
       } else {
-        setMessage(data.error || "Transaction failed");
+        setMessage(finalizeData.error || "Failed to update price");
       }
     } catch (error) {
-      console.error("Transaction error:", error);
+      console.error("Price update error:", error);
       if (error.message?.includes("User rejected")) {
-        setMessage("Message signing was rejected. Please try again.");
+        setMessage("Transaction was rejected. Please try again.");
       } else {
-        setMessage("Error sending transaction");
+        setMessage(error.message || "Error updating price");
       }
     }
 
-    setSending(false);
+    setPriceUpdating(false);
   };
 
   const updateBalance = async () => {
@@ -268,6 +423,9 @@ export default function UserDashboard() {
               <button className={styles.btn} onClick={registerUser} disabled={loading}>
                 {loading ? "Registering..." : "Register"}
               </button>
+              <button className={styles.btn} onClick={loadUserData} style={{ marginLeft: "10px" }}>
+                Check Registration Status
+              </button>
             </div>
           ) : (
             <>
@@ -303,53 +461,23 @@ export default function UserDashboard() {
               </div>
 
               <div className={styles.card}>
-                <h3>Send ETH</h3>
-                <input
-                  type="text"
-                  placeholder="Recipient Address (0x...)"
-                  value={txTo}
-                  onChange={(e) => setTxTo(e.target.value)}
-                  className={styles.input}
-                  style={{ width: "100%", marginBottom: "10px" }}
-                />
-                <input
-                  type="text"
-                  placeholder="Amount in ETH"
-                  value={txValue}
-                  onChange={(e) => setTxValue(e.target.value)}
-                  className={styles.input}
-                  style={{ width: "100%", marginBottom: "10px" }}
-                />
-                <button className={styles.btn} onClick={sendTransaction} disabled={sending}>
-                  {sending ? "Sending..." : "Send Transaction"}
+                <h3>Oracle Price Update</h3>
+                <p>
+                  <strong>Current Price:</strong> ${currentPrice}
+                </p>
+                <button className={styles.btn} onClick={updatePrice} disabled={priceUpdating}>
+                  {priceUpdating ? "Updating..." : "Update Price from Oracle"}
+                </button>
+                <button
+                  className={styles.btn}
+                  onClick={fetchCurrentPrice}
+                  style={{ marginLeft: "10px" }}
+                >
+                  Refresh Price
                 </button>
               </div>
 
               <ContractInteraction wallet={wallet} />
-
-              {transactions.length > 0 && (
-                <div className={styles.card}>
-                  <h3>Recent Transactions</h3>
-                  {transactions.map((tx, i) => (
-                    <div key={i} style={{ marginBottom: "10px", fontSize: "0.9em" }}>
-                      <a
-                        href={`https://sepolia.etherscan.io/tx/${tx.hash}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{ color: "#0070f3" }}
-                      >
-                        {tx.hash.substring(0, 10)}...{tx.hash.substring(tx.hash.length - 8)}
-                      </a>
-                      <br />
-                      To: {tx.to.substring(0, 10)}...
-                      <br />
-                      Amount: {tx.value} ETH
-                      <br />
-                      {tx.timestamp}
-                    </div>
-                  ))}
-                </div>
-              )}
             </>
           )}
 

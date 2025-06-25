@@ -1,19 +1,29 @@
-import { contractCall } from "@neardefi/shade-agent-js";
 import { simpleAuthMiddleware } from "../../../utils/simpleAuth";
 import { Evm } from "../../../utils/ethereum";
 import { NextApiRequest, NextApiResponse } from "next";
 
 const contractId = process.env.NEXT_PUBLIC_contractId;
 
-async function handler(req: NextApiRequest, res: NextApiResponse) {
+interface RegisterRequest extends NextApiRequest {
+  body: {
+    accountId: string;
+    derivationPath: string;
+    txHash?: string;
+  };
+}
+
+async function handler(req: RegisterRequest, res: NextApiResponse) {
   const { accountId } = req.user;
+  const { derivationPath, txHash } = req.body;
 
   try {
-    // Call the worker agent to register user in smart contract
-    const derivationPath = await contractCall({
-      methodName: "register_user",
-      args: {},
-    });
+    // Verify the derivation path matches the expected format
+    const expectedPath = `ethereum-${accountId}`;
+    if (derivationPath !== expectedPath) {
+      return res.status(400).json({
+        error: "Invalid derivation path for user",
+      });
+    }
 
     // Derive ETH address for user
     const { address } = await Evm.deriveAddressAndPublicKey(contractId, derivationPath);
@@ -23,29 +33,15 @@ async function handler(req: NextApiRequest, res: NextApiResponse) {
       accountId,
       ethAddress: address,
       derivationPath,
+      txHash,
+      message: "User registration confirmed",
     });
   } catch (error) {
     console.error("Registration error:", error);
-
-    // Check if user is already registered
-    if (error.message && error.message.includes("already registered")) {
-      // If already registered, still return their ETH address
-      const derivationPath = `ethereum-${accountId}`;
-      const { address } = await Evm.deriveAddressAndPublicKey(contractId, derivationPath);
-
-      return res.status(200).json({
-        success: true,
-        accountId,
-        ethAddress: address,
-        derivationPath,
-        message: "User already registered",
-      });
-    } else {
-      return res.status(500).json({
-        error: error.message || "Registration failed",
-        details: error.toString(),
-      });
-    }
+    return res.status(500).json({
+      error: error.message || "Registration confirmation failed",
+      details: error.toString(),
+    });
   }
 }
 
