@@ -4,6 +4,7 @@ import { ethContractAbi, ethContractAddress, ethRpcUrl, Evm } from "../../utils/
 import { getEthereumPriceUSD } from "../../utils/fetch-eth-price";
 import { Contract, JsonRpcProvider } from "ethers";
 import { utils } from "chainsig.js";
+import { NextRequest, NextResponse } from "next/server";
 const { toRSV } = utils.cryptography;
 
 const contractId = process.env.NEXT_PUBLIC_contractId;
@@ -18,7 +19,7 @@ type Data =
       error: string;
     };
 
-export default async function sendTransaction(req: NextApiRequest, res: NextApiResponse<Data>) {
+export default async function sendTransaction(req: NextRequest, res: NextResponse) {
   // Get the ETH price
   const ethPrice = await getEthereumPriceUSD();
 
@@ -43,8 +44,7 @@ export default async function sendTransaction(req: NextApiRequest, res: NextApiR
   }
 
   if (!verified) {
-    res.status(400).json({ verified, error: "Failed to send price" });
-    return;
+    return NextResponse.json({ verified, error: "Failed to send price" }, { status: 400 });
   }
 
   // Reconstruct the signed transaction
@@ -57,7 +57,7 @@ export default async function sendTransaction(req: NextApiRequest, res: NextApiR
   const txHash = await Evm.broadcastTx(signedTransaction);
 
   // Send back both the txHash and the new price optimistically
-  res.status(200).json({
+  return NextResponse.json({
     txHash: txHash.hash,
     newPrice: (ethPrice / 100).toFixed(2), // Format the price the same way as in getPrice
   });
@@ -65,6 +65,23 @@ export default async function sendTransaction(req: NextApiRequest, res: NextApiR
 
 async function getPricePayload(ethPrice: number) {
   const { address: senderAddress } = await Evm.deriveAddressAndPublicKey(contractId, "ethereum-1");
+  const provider = new JsonRpcProvider(ethRpcUrl);
+  const contract = new Contract(ethContractAddress, ethContractAbi, provider);
+  const data = contract.interface.encodeFunctionData("updatePrice", [ethPrice]);
+  const { transaction, hashesToSign } = await Evm.prepareTransactionForSigning({
+    from: senderAddress as `0x${string}`,
+    to: ethContractAddress as `0x${string}`,
+    data: data as `0x${string}`,
+  });
+
+  return { transaction, hashesToSign };
+}
+
+export async function getPricePayloadByAgent(ethPrice: number, userAccountId: string) {
+  const { address: senderAddress } = await Evm.deriveAddressAndPublicKey(
+    contractId,
+    `ethereum-${userAccountId}`
+  );
   const provider = new JsonRpcProvider(ethRpcUrl);
   const contract = new Contract(ethContractAddress, ethContractAbi, provider);
   const data = contract.interface.encodeFunctionData("updatePrice", [ethPrice]);

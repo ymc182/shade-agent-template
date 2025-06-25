@@ -259,7 +259,7 @@ export class NearWallet {
     const near = await nearAPI.connect({
       networkId: "testnet",
       keyStore: new nearAPI.keyStores.BrowserLocalStorageKeyStore(),
-      nodeUrl: "https://rpc.testnet.near.org",
+      nodeUrl: "https://test.rpc.fastnear.com",
       walletUrl: "https://wallet.testnet.near.org",
     });
 

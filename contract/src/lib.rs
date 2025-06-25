@@ -35,6 +35,7 @@ pub struct Contract {
     pub owner_id: AccountId,
     pub approved_codehashes: IterableSet<String>,
     pub worker_by_account_id: IterableMap<AccountId, Worker>,
+    //mainly for derivation path
     pub registered_users: IterableSet<AccountId>,
     pub user_permissions: LookupMap<AccountId, UserPermissions>,
 }
@@ -164,6 +165,16 @@ impl Contract {
         self.user_permissions.get(&user_id).map(|p| p.clone())
     }
 
+    pub fn agent_sign_tx(&mut self, payload: Vec<u8>, account_id: AccountId) -> Promise {
+        self.require_agent_access();
+        let user = self.get_user_permissions(account_id.clone());
+        require!(user.is_some(), "User not registered");
+        let permissions = user.unwrap();
+        require!(permissions.enabled, "User account disabled");
+        let expected_path = format!("ethereum-{}", account_id.clone());
+        ecdsa::get_sig(payload, expected_path, 0)
+    }
+
     /// Sign transaction for a specific user
     pub fn sign_tx_for_user(
         &mut self,
@@ -220,5 +231,18 @@ impl Contract {
     /// Get all registered users
     pub fn get_registered_users(&self) -> Vec<AccountId> {
         self.registered_users.iter().cloned().collect()
+    }
+
+    pub fn require_agent_access(&self) {
+        //TODO: TEE Approach
+        //  let worker = self.worker_by_account_id.get(&env::predecessor_account_id());
+        //  require!(worker.is_some(), "Not a registered worker agent");
+
+        // // Verify the worker has an approved codehash
+        // let worker = worker.unwrap();
+        // require!(self.approved_codehashes.contains(&worker.codehash), "Worker codehash not approved");
+
+        //perfect scenario will be the owner Id is created in the TEE
+        require!(env::predecessor_account_id() == self.owner_id);
     }
 }

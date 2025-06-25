@@ -8,6 +8,7 @@ import "@near-wallet-selector/modal-ui/styles.css";
 import { useSimpleAuth } from "../hooks/useSimpleAuth";
 import { useAuth } from "../hooks/useAuth";
 import { getContractPrice, convertToDecimal } from "../utils/ethereum";
+import * as nearAPI from "near-api-js";
 
 export default function UserDashboard() {
   const [wallet, setWallet] = useState(null);
@@ -22,6 +23,12 @@ export default function UserDashboard() {
   const [priceUpdating, setPriceUpdating] = useState(false);
   const { getAuthHeaders } = useSimpleAuth();
   const { authenticate, isAuthenticating } = useAuth();
+
+  // Function call key states
+  const [functionCallKey, setFunctionCallKey] = useState(null);
+  const [showKeyModal, setShowKeyModal] = useState(false);
+  const [keyGenerating, setKeyGenerating] = useState(false);
+  const [copySuccess, setCopySuccess] = useState(false);
 
   useEffect(() => {
     initWallet();
@@ -384,6 +391,98 @@ export default function UserDashboard() {
     }
   };
 
+  const generateFunctionCallKey = async () => {
+    setKeyGenerating(true);
+    setMessage("");
+
+    try {
+      // Generate a new key pair
+      const keyPair = nearAPI.utils.KeyPair.fromRandom("ed25519");
+      const publicKey = keyPair.getPublicKey();
+      const privateKey = keyPair.toString();
+
+      // Store the key details and show instructions
+      setFunctionCallKey({
+        publicKey: publicKey.toString(),
+        privateKey: privateKey,
+        contractId: process.env.NEXT_PUBLIC_contractId,
+        accountId: userAccount,
+        isNotYetAdded: true, // Flag to indicate the key needs to be added manually
+      });
+      setShowKeyModal(true);
+      setMessage("Function call key generated! Follow the instructions to add it to your account.");
+    } catch (error) {
+      console.error("Error generating function call key:", error);
+      setMessage(`Error generating function call key: ${error.message}`);
+    } finally {
+      setKeyGenerating(false);
+    }
+  };
+
+  const copyKeyToClipboard = async (text) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 2000);
+    } catch (err) {
+      console.error("Failed to copy:", err);
+    }
+  };
+
+  const listAccessKeys = async () => {
+    try {
+      setMessage("Fetching access keys...");
+
+      // Connect to NEAR
+      const config = {
+        networkId: "testnet",
+        nodeUrl: "https://rpc.testnet.near.org",
+      };
+
+      const near = await nearAPI.connect(config);
+      const account = await near.account(userAccount);
+
+      // Get all access keys for the account
+      const keys = await account.getAccessKeys();
+
+      console.log("Access keys for account:", keys);
+
+      // Filter function call keys for our contract
+      const functionCallKeys = keys.filter(
+        (key) =>
+          key.access_key.permission !== "FullAccess" &&
+          key.access_key.permission.FunctionCall &&
+          key.access_key.permission.FunctionCall.receiver_id === process.env.NEXT_PUBLIC_contractId
+      );
+
+      if (functionCallKeys.length > 0) {
+        setMessage(`Found ${functionCallKeys.length} function call key(s) for the contract`);
+        console.log("Function call keys:", functionCallKeys);
+      } else {
+        setMessage("No function call keys found for the contract");
+      }
+
+      return keys;
+    } catch (error) {
+      console.error("Error fetching access keys:", error);
+      setMessage(`Error fetching access keys: ${error.message}`);
+    }
+  };
+
+  const updatePriceByAgent = async () => {
+    const userAccountId = walletSelector.getAccountId();
+    if (!userAccountId) {
+      setMessage("Please connect your wallet first");
+      return;
+    }
+    console.log("userAccountId", userAccountId);
+    const result = await fetch("/api/agent/update-price", {
+      method: "POST",
+      body: JSON.stringify({ userAccountId: userAccountId }),
+    });
+    const data = await result.json();
+    console.log("data", data);
+  };
   return (
     <div className={styles.userDashboard}>
       <h2>Multi-User ETH Wallet</h2>
@@ -494,6 +593,196 @@ export default function UserDashboard() {
         disabled={isAuthenticating || !userAccount}
       >
         {isAuthenticating ? "Authenticating..." : "Test NEAR Authentication"}
+      </button>
+
+      {userAccount && (
+        <div className={styles.card} style={{ marginTop: "20px" }}>
+          <h3>Function Call Access Key</h3>
+          <p>Generate a function call access key for the contract</p>
+          <button className={styles.btn} onClick={generateFunctionCallKey} disabled={keyGenerating}>
+            {keyGenerating ? "Generating..." : "Generate Function Call Key"}
+          </button>
+          <button className={styles.btn} onClick={listAccessKeys} style={{ marginLeft: "10px" }}>
+            List Existing Keys
+          </button>
+        </div>
+      )}
+
+      {/* Function Call Key Modal */}
+      {showKeyModal && functionCallKey && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0, 0, 0, 0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+          onClick={() => setShowKeyModal(false)}
+        >
+          <div
+            className={styles.card}
+            style={{
+              maxWidth: "600px",
+              width: "90%",
+              maxHeight: "80vh",
+              overflow: "auto",
+              backgroundColor: "white",
+              padding: "30px",
+              borderRadius: "10px",
+              boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3>Function Call Access Key Generated!</h3>
+            {functionCallKey.isNotYetAdded ? (
+              <div
+                style={{
+                  backgroundColor: "#fff3cd",
+                  border: "1px solid #ffeaa7",
+                  padding: "15px",
+                  borderRadius: "5px",
+                  marginBottom: "20px",
+                }}
+              >
+                <p style={{ color: "#856404", fontWeight: "bold", marginBottom: "10px" }}>
+                  ⚠️ Key Generated but Not Yet Added to Account
+                </p>
+                <p style={{ color: "#856404", marginBottom: "10px" }}>
+                  To add this key to your account, use the NEAR CLI:
+                </p>
+                <pre
+                  style={{
+                    backgroundColor: "#f5f5f5",
+                    padding: "10px",
+                    borderRadius: "5px",
+                    fontSize: "0.8em",
+                    overflow: "auto",
+                    color: "#333",
+                  }}
+                >
+                  {`near add-key ${functionCallKey.accountId} ${functionCallKey.publicKey} \\
+  --allowance 0.25 \\
+  --receiver-id ${functionCallKey.contractId} \\
+  --method-names '' \\
+  --network-id testnet`}
+                </pre>
+                <p style={{ color: "#856404", marginTop: "10px", fontSize: "0.9em" }}>
+                  Or use the full access key from your wallet to add it programmatically.
+                </p>
+              </div>
+            ) : (
+              <p style={{ color: "#28a745", fontWeight: "bold", marginBottom: "20px" }}>
+                ✅ Key successfully added to your account!
+              </p>
+            )}
+            <p style={{ color: "#ff4444", fontWeight: "bold", marginBottom: "20px" }}>
+              ⚠️ IMPORTANT: Save this private key securely. It will not be shown again!
+            </p>
+
+            <div style={{ marginBottom: "20px" }}>
+              <h4>Account ID:</h4>
+              <p style={{ fontFamily: "monospace", wordBreak: "break-all" }}>
+                {functionCallKey.accountId}
+              </p>
+            </div>
+
+            <div style={{ marginBottom: "20px" }}>
+              <h4>Contract ID:</h4>
+              <p style={{ fontFamily: "monospace", wordBreak: "break-all" }}>
+                {functionCallKey.contractId}
+              </p>
+            </div>
+
+            <div style={{ marginBottom: "20px" }}>
+              <h4>Public Key:</h4>
+              <p style={{ fontFamily: "monospace", wordBreak: "break-all" }}>
+                {functionCallKey.publicKey}
+              </p>
+              <button
+                className={styles.btn}
+                onClick={() => copyKeyToClipboard(functionCallKey.publicKey)}
+                style={{ marginTop: "10px" }}
+              >
+                Copy Public Key
+              </button>
+            </div>
+
+            <div style={{ marginBottom: "20px" }}>
+              <h4>Private Key:</h4>
+              <p
+                style={{
+                  fontFamily: "monospace",
+                  wordBreak: "break-all",
+                  backgroundColor: "#f5f5f5",
+                  padding: "10px",
+                  borderRadius: "5px",
+                }}
+              >
+                {functionCallKey.privateKey}
+              </p>
+              <button
+                className={styles.btn}
+                onClick={() => copyKeyToClipboard(functionCallKey.privateKey)}
+                style={{ marginTop: "10px" }}
+              >
+                {copySuccess ? "Copied!" : "Copy Private Key"}
+              </button>
+            </div>
+
+            <div
+              style={{
+                marginTop: "20px",
+                padding: "15px",
+                backgroundColor: "#f0f8ff",
+                borderRadius: "5px",
+              }}
+            >
+              <h4>How to use this key:</h4>
+              <p>This function call access key can be used to:</p>
+              <ul style={{ textAlign: "left", margin: "10px 0" }}>
+                <li>Call any method on contract: {functionCallKey.contractId}</li>
+                <li>Sign transactions programmatically without wallet prompts</li>
+                <li>Use in backend services or automated scripts</li>
+              </ul>
+              <p style={{ marginTop: "10px", fontSize: "0.9em" }}>
+                Example usage with near-api-js:
+              </p>
+              <pre
+                style={{
+                  backgroundColor: "#f5f5f5",
+                  padding: "10px",
+                  borderRadius: "5px",
+                  fontSize: "0.8em",
+                  overflow: "auto",
+                }}
+              >
+                {`const keyPair = nearAPI.utils.KeyPair.fromString(privateKey);
+const keyStore = new nearAPI.keyStores.InMemoryKeyStore();
+await keyStore.setKey("testnet", accountId, keyPair);`}
+              </pre>
+            </div>
+
+            <button
+              className={styles.btn}
+              onClick={() => {
+                setShowKeyModal(false);
+                setFunctionCallKey(null);
+              }}
+              style={{ marginTop: "20px" }}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+      <button className={styles.btn} onClick={updatePriceByAgent}>
+        Update Price by Agent
       </button>
     </div>
   );
